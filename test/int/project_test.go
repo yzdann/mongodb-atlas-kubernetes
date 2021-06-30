@@ -151,6 +151,69 @@ var _ = Describe("AtlasProject", func() {
 		})
 	})
 
+	Describe("Importing existing projects into Operator", func() {
+		ipList := map[string]string{
+			"comment": "blah",
+			"ip":      "192.0.2.20",
+		}
+		It("Should keep a project's existing IP allow lists if none specified", func() {
+			consistentProjectName := "consistent.staging.com"
+			rootCtx, rootCancel := context.WithTimeout(context.Background(), 1*time.Minute)
+			defer rootCancel()
+			By(`Creating a project with retention policy "keep" and `, func() {
+				createdProject = mdbv1.DefaultProject(namespace.Name, connectionSecret.Name).
+					WithIPAccessList(project.NewIPAccessList().WithComment(ipList["comment"]).
+						WithIP(ipList["ip"])).
+					WithAtlasName(consistentProjectName)
+
+				createdProject.Annotations = map[string]string{
+					customresource.ResourcePolicyAnnotation: customresource.ResourcePolicyKeep,
+				}
+				Expect(k8sClient.Create(rootCtx, createdProject)).ToNot(HaveOccurred())
+				Eventually(testutil.WaitFor(k8sClient, createdProject, status.TrueCondition(status.ReadyType)),
+					ProjectCreationTimeout, interval).Should(BeTrue())
+				checkIPAccessListInAtlas()
+			})
+
+			By(`Deleting the project in kubernetes, but keeping it in Atlas`, func() {
+				Expect(k8sClient.Delete(rootCtx, createdProject)).ToNot(HaveOccurred())
+				time.Sleep(10 * time.Second)
+				Expect(checkAtlasProjectRemoved(createdProject.Status.ID)()).Should(BeFalse())
+				checkIPAccessListInAtlas()
+			})
+
+			By(`Re-creating the project without IPAccessLists`, func() {
+				recreatedProject := mdbv1.DefaultProject(namespace.Name, connectionSecret.Name).
+					WithAtlasName(consistentProjectName)
+				recreatedProject.Name = createdProject.Name
+				recreatedProject.Annotations = map[string]string{
+					customresource.ResourcePolicyAnnotation: customresource.ResourcePolicyKeep,
+				}
+				recreatedProject.Spec.ProjectIPAccessList = nil
+				Expect(k8sClient.Create(rootCtx, recreatedProject)).ToNot((HaveOccurred()))
+				Eventually(testutil.WaitFor(k8sClient, recreatedProject, status.TrueCondition(status.ReadyType)),
+					ProjectCreationTimeout, interval).Should(BeTrue())
+				Expect(createdProject.ID()).To(Equal(recreatedProject.ID()))
+				list, _, err := atlasClient.ProjectIPAccessList.List(context.Background(), recreatedProject.ID(), &mongodbatlas.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				found := false
+				for _, item := range list.Results {
+					if item.IPAddress == ipList["ip"] && item.Comment == ipList["comment"] {
+						found = true
+					}
+				}
+				Expect(found).To(BeFalse())
+				createdProject = recreatedProject
+			})
+
+			By("Removing ResourcePolicy Keep", func() {
+				createdProject.Annotations = nil
+				k8sClient.Update(context.Background(), createdProject)
+			})
+		})
+	})
+
 	Describe("Updating the project", func() {
 		It("Should Succeed", func() {
 			By("Creating the project first")
