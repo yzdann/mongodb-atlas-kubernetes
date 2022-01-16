@@ -10,7 +10,7 @@ require (
 	github.com/google/go-cmp v0.5.6
 	github.com/mongodb-forks/digest v1.0.2
 	github.com/mxschmitt/playwright-go v0.1100.0
-	github.com/onsi/ginkgo v1.16.4
+	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.11.0
 	github.com/pborman/uuid v1.2.1
 	github.com/sethvargo/go-password v0.2.0
